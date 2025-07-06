@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { Upload, Download, FileImage, Settings, Zap, ArrowRight } from 'lucide-react';
+import { Upload, Download, Zap, ArrowRight, Settings2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
-import { Slider } from './ui/slider';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Progress } from './ui/progress';
+import { Switch } from './ui/switch';
 import { useToast } from '@/hooks/use-toast';
+import CompressorSettings from './CompressorSettings';
+import ComparisonSlider from './ComparisonSlider';
 
 interface CompressedImage {
   file: File;
@@ -24,6 +25,10 @@ const ImageCompressor = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [dragActive, setDragActive] = useState(false);
+  const [advancedMode, setAdvancedMode] = useState(false);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [originalDimensions, setOriginalDimensions] = useState({ width: 0, height: 0 });
+  const [maintainAspectRatio, setMaintainAspectRatio] = useState(true);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -62,7 +67,16 @@ const ImageCompressor = () => {
     setSelectedImage(file);
     const reader = new FileReader();
     reader.onload = (e) => {
-      setImagePreview(e.target?.result as string);
+      const result = e.target?.result as string;
+      setImagePreview(result);
+      
+      // Get original dimensions
+      const img = new Image();
+      img.onload = () => {
+        setOriginalDimensions({ width: img.width, height: img.height });
+        setDimensions({ width: img.width, height: img.height });
+      };
+      img.src = result;
     };
     reader.readAsDataURL(file);
     setCompressedImage(null);
@@ -89,16 +103,10 @@ const ImageCompressor = () => {
       const img = new Image();
       
       img.onload = () => {
-        // Calculate new dimensions (simple compression by maintaining aspect ratio)
-        const maxWidth = 1920;
-        const maxHeight = 1080;
-        let { width, height } = img;
-
-        if (width > maxWidth || height > maxHeight) {
-          const ratio = Math.min(maxWidth / width, maxHeight / height);
-          width *= ratio;
-          height *= ratio;
-        }
+        // Use specified dimensions or original
+        let { width, height } = dimensions.width && dimensions.height 
+          ? dimensions 
+          : { width: img.width, height: img.height };
 
         canvas.width = width;
         canvas.height = height;
@@ -159,6 +167,34 @@ const ImageCompressor = () => {
     });
   };
 
+  const handlePresetSelect = (presetName: string) => {
+    const presets = {
+      'Web Optimized': { quality: [85], format: 'webp', maxWidth: 1920 },
+      'Social Media': { quality: [80], format: 'jpeg', maxWidth: 1080 },
+      'Email Friendly': { quality: [75], format: 'jpeg', maxWidth: 800 },
+      'Thumbnail': { quality: [70], format: 'webp', maxWidth: 300 },
+      'Maximum Quality': { quality: [95], format: 'png', maxWidth: null },
+      'Maximum Compression': { quality: [50], format: 'webp', maxWidth: 1200 },
+    };
+
+    const preset = presets[presetName as keyof typeof presets];
+    if (preset) {
+      setQuality(preset.quality);
+      setFormat(preset.format);
+      if (preset.maxWidth && originalDimensions.width) {
+        const aspectRatio = originalDimensions.width / originalDimensions.height;
+        const newWidth = Math.min(preset.maxWidth, originalDimensions.width);
+        const newHeight = Math.round(newWidth / aspectRatio);
+        setDimensions({ width: newWidth, height: newHeight });
+      }
+
+      toast({
+        title: "Preset Applied",
+        description: `${presetName} settings have been applied.`,
+      });
+    }
+  };
+
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -199,6 +235,11 @@ const ImageCompressor = () => {
               <p className="text-muted-foreground">
                 {selectedImage?.name} • {formatFileSize(selectedImage?.size || 0)}
               </p>
+              {originalDimensions.width && (
+                <p className="text-sm text-muted-foreground">
+                  {originalDimensions.width} × {originalDimensions.height} pixels
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-4">
@@ -219,53 +260,52 @@ const ImageCompressor = () => {
         </div>
       </Card>
 
+      {/* Mode Toggle */}
+      {selectedImage && (
+        <Card className="glass-card p-6 animate-slide-up">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Settings2 className="w-5 h-5 text-primary" />
+              <span className="font-medium">Compression Mode</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`text-sm ${!advancedMode ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
+                Simple
+              </span>
+              <Switch
+                checked={advancedMode}
+                onCheckedChange={setAdvancedMode}
+              />
+              <span className={`text-sm ${advancedMode ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
+                Advanced
+              </span>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Settings Section */}
       {selectedImage && (
-        <Card className="glass-card p-8 animate-slide-up">
-          <div className="flex items-center gap-3 mb-6">
-            <Settings className="w-6 h-6 text-primary" />
-            <h3 className="text-xl font-semibold">Compression Settings</h3>
-          </div>
-          
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-3">Output Format</label>
-                <Select value={format} onValueChange={setFormat}>
-                  <SelectTrigger className="glass-card border-border">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="webp">WebP (Best compression)</SelectItem>
-                    <SelectItem value="jpeg">JPEG (Universal)</SelectItem>
-                    <SelectItem value="png">PNG (Lossless)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-3">
-                  Quality: {quality[0]}%
-                </label>
-                <Slider
-                  value={quality}
-                  onValueChange={setQuality}
-                  max={100}
-                  min={10}
-                  step={5}
-                  className="w-full"
-                />
-              </div>
-            </div>
-          </div>
+        <>
+          <CompressorSettings
+            format={format}
+            setFormat={setFormat}
+            quality={quality}
+            setQuality={setQuality}
+            dimensions={dimensions}
+            setDimensions={setDimensions}
+            maintainAspectRatio={maintainAspectRatio}
+            setMaintainAspectRatio={setMaintainAspectRatio}
+            originalDimensions={originalDimensions}
+            advancedMode={advancedMode}
+            onPresetSelect={handlePresetSelect}
+          />
 
-          <div className="mt-8">
+          <div className="text-center">
             <Button
               onClick={compressImage}
               disabled={isProcessing}
-              className="btn-primary w-full py-6 text-lg font-semibold"
+              className="btn-primary px-12 py-6 text-lg font-semibold"
             >
               {isProcessing ? (
                 <>
@@ -279,76 +319,42 @@ const ImageCompressor = () => {
                 </>
               )}
             </Button>
-          </div>
 
-          {isProcessing && (
-            <div className="mt-6 space-y-2">
-              <Progress value={progress} className="h-2" />
-              <p className="text-sm text-center text-muted-foreground">
-                Processing... {progress}%
-              </p>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {/* Results Section */}
-      {compressedImage && (
-        <Card className="glass-card p-8 animate-slide-up">
-          <div className="flex items-center gap-3 mb-6">
-            <FileImage className="w-6 h-6 text-primary" />
-            <h3 className="text-xl font-semibold">Compression Results</h3>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="space-y-4">
-              <h4 className="font-medium">Original</h4>
-              <img
-                src={imagePreview}
-                alt="Original"
-                className="w-full rounded-lg shadow-lg"
-              />
-              <p className="text-sm text-muted-foreground">
-                Size: {formatFileSize(compressedImage.originalSize)}
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <h4 className="font-medium">Compressed</h4>
-              <img
-                src={compressedImage.url}
-                alt="Compressed"
-                className="w-full rounded-lg shadow-lg"
-              />
-              <p className="text-sm text-muted-foreground">
-                Size: {formatFileSize(compressedImage.compressedSize)}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-8 p-6 glass-card rounded-xl">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">Compression Savings</p>
-                <p className="text-2xl font-bold gradient-text">
-                  {Math.round(((compressedImage.originalSize - compressedImage.compressedSize) / compressedImage.originalSize) * 100)}%
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Saved {formatFileSize(compressedImage.originalSize - compressedImage.compressedSize)}
+            {isProcessing && (
+              <div className="mt-6 space-y-2 max-w-md mx-auto">
+                <Progress value={progress} className="h-2" />
+                <p className="text-sm text-center text-muted-foreground">
+                  Processing... {progress}%
                 </p>
               </div>
-              
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Comparison Results */}
+      {compressedImage && (
+        <>
+          <ComparisonSlider
+            originalImage={imagePreview}
+            compressedImage={compressedImage.url}
+            originalSize={compressedImage.originalSize}
+            compressedSize={compressedImage.compressedSize}
+          />
+
+          <Card className="glass-card p-8 animate-slide-up">
+            <div className="flex items-center justify-center">
               <Button
                 onClick={downloadImage}
-                className="btn-primary px-8 py-4 text-lg font-semibold"
+                className="btn-primary px-12 py-6 text-lg font-semibold"
               >
-                <Download className="w-5 h-5 mr-2" />
-                Download
-                <ArrowRight className="w-5 h-5 ml-2" />
+                <Download className="w-6 h-6 mr-3" />
+                Download Compressed Image
+                <ArrowRight className="w-6 h-6 ml-3" />
               </Button>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </>
       )}
     </div>
   );
